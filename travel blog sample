@@ -1,0 +1,468 @@
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Image } from '@/components/ui/image';
+import { Search, MapPin, Calendar, Star, Filter, Grid, List, Heart } from 'lucide-react';
+import { BaseCrudService } from '@/integrations';
+import { useMember } from '@/integrations';
+
+interface Destination {
+  _id: string;
+  title: string;
+  continent: string;
+  travelType: string;
+  description: string;
+  imageUrl: string;
+  featured: boolean;
+  rating: number;
+  duration: string;
+  price: number;
+  highlights: string[];
+  bestTimeToVisit: string;
+}
+
+interface UserFavorite {
+  _id: string;
+  userId: string;
+  destinationId: string;
+  addedAt: Date;
+}
+
+export default function DestinationsPage() {
+  const { member, isAuthenticated } = useMember();
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [favorites, setFavorites] = useState<UserFavorite[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedContinent, setSelectedContinent] = useState('');
+  const [selectedTravelType, setSelectedTravelType] = useState('');
+  const [priceRange, setPriceRange] = useState('');
+  const [sortBy, setSortBy] = useState('title');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    loadDestinations();
+    if (isAuthenticated && member?.id) {
+      loadUserFavorites();
+    }
+  }, [isAuthenticated, member]);
+
+  const loadDestinations = async () => {
+    try {
+      const { items } = await BaseCrudService.getAll<Destination>('destinations');
+      setDestinations(items);
+    } catch (error) {
+      console.error('Failed to load destinations:', error);
+    }
+  };
+
+  const loadUserFavorites = async () => {
+    if (!member?.id) return;
+    try {
+      const { items } = await BaseCrudService.getAll<UserFavorite>('user-favorites');
+      setFavorites(items.filter(fav => fav.userId === member.id));
+    } catch (error) {
+      console.error('Failed to load favorites:', error);
+    }
+  };
+
+  const toggleFavorite = async (destinationId: string) => {
+    if (!isAuthenticated || !member?.id) return;
+
+    const existingFavorite = favorites.find(fav => fav.destinationId === destinationId);
+    
+    try {
+      if (existingFavorite) {
+        await BaseCrudService.delete('user-favorites', existingFavorite._id);
+        setFavorites(favorites.filter(fav => fav._id !== existingFavorite._id));
+      } else {
+        const newFavorite = {
+          _id: crypto.randomUUID(),
+          userId: member.id,
+          destinationId,
+          addedAt: new Date()
+        };
+        await BaseCrudService.create('user-favorites', newFavorite);
+        setFavorites([...favorites, newFavorite]);
+      }
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+    }
+  };
+
+  const isFavorite = (destinationId: string) => {
+    return favorites.some(fav => fav.destinationId === destinationId);
+  };
+
+  const filteredAndSortedDestinations = destinations
+    .filter(dest => {
+      const matchesSearch = dest.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           dest.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesContinent = !selectedContinent || dest.continent === selectedContinent;
+      const matchesTravelType = !selectedTravelType || dest.travelType === selectedTravelType;
+      
+      let matchesPrice = true;
+      if (priceRange) {
+        const [min, max] = priceRange.split('-').map(Number);
+        matchesPrice = dest.price >= min && (max ? dest.price <= max : true);
+      }
+      
+      return matchesSearch && matchesContinent && matchesTravelType && matchesPrice;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'price-low':
+          return a.price - b.price;
+        case 'price-high':
+          return b.price - a.price;
+        case 'rating':
+          return b.rating - a.rating;
+        case 'title':
+        default:
+          return a.title.localeCompare(b.title);
+      }
+    });
+
+  const continents = [...new Set(destinations.map(dest => dest.continent))];
+  const travelTypes = [...new Set(destinations.map(dest => dest.travelType))];
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSelectedContinent('');
+    setSelectedTravelType('');
+    setPriceRange('');
+    setSortBy('title');
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Hero Section */}
+      <section className="bg-secondary py-16">
+        <div className="max-w-[100rem] mx-auto px-8 lg:px-16 text-center">
+          <h1 className="font-heading text-5xl text-secondary-foreground mb-4">
+            Explore Destinations
+          </h1>
+          <p className="font-paragraph text-lg text-secondary-foreground/80 max-w-2xl mx-auto">
+            Discover amazing places around the world with our curated collection of travel guides
+          </p>
+        </div>
+      </section>
+
+      <div className="max-w-[100rem] mx-auto px-8 lg:px-16 py-8">
+        {/* Search and Filter Controls */}
+        <div className="bg-white rounded-lg border border-primary/10 p-6 mb-8">
+          <div className="flex flex-col lg:flex-row gap-4 mb-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-primary/60 h-4 w-4" />
+              <Input
+                placeholder="Search destinations..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 border-primary/20 focus:border-primary"
+              />
+            </div>
+            <Button
+              onClick={() => setShowFilters(!showFilters)}
+              variant="outline"
+              className="border-primary text-primary hover:bg-primary hover:text-primary-foreground lg:w-auto"
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              Filters
+            </Button>
+          </div>
+
+          {showFilters && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-primary/10">
+              <select
+                value={selectedContinent}
+                onChange={(e) => setSelectedContinent(e.target.value)}
+                className="px-3 py-2 border border-primary/20 rounded-md bg-background text-primary focus:border-primary focus:outline-none"
+              >
+                <option value="">All Continents</option>
+                {continents.map(continent => (
+                  <option key={continent} value={continent}>{continent}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedTravelType}
+                onChange={(e) => setSelectedTravelType(e.target.value)}
+                className="px-3 py-2 border border-primary/20 rounded-md bg-background text-primary focus:border-primary focus:outline-none"
+              >
+                <option value="">All Travel Types</option>
+                {travelTypes.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+
+              <select
+                value={priceRange}
+                onChange={(e) => setPriceRange(e.target.value)}
+                className="px-3 py-2 border border-primary/20 rounded-md bg-background text-primary focus:border-primary focus:outline-none"
+              >
+                <option value="">All Prices</option>
+                <option value="0-500">$0 - $500</option>
+                <option value="500-1000">$500 - $1000</option>
+                <option value="1000-2000">$1000 - $2000</option>
+                <option value="2000-99999">$2000+</option>
+              </select>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="px-3 py-2 border border-primary/20 rounded-md bg-background text-primary focus:border-primary focus:outline-none"
+              >
+                <option value="title">Sort by Name</option>
+                <option value="price-low">Price: Low to High</option>
+                <option value="price-high">Price: High to Low</option>
+                <option value="rating">Highest Rated</option>
+              </select>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center mt-4 pt-4 border-t border-primary/10">
+            <div className="flex items-center space-x-4">
+              <span className="font-paragraph text-sm text-primary/70">
+                {filteredAndSortedDestinations.length} destinations found
+              </span>
+              <Button
+                onClick={clearFilters}
+                variant="ghost"
+                size="sm"
+                className="text-primary/70 hover:text-primary"
+              >
+                Clear all filters
+              </Button>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button
+                onClick={() => setViewMode('grid')}
+                variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                size="sm"
+                className={viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'text-primary/70'}
+              >
+                <Grid className="h-4 w-4" />
+              </Button>
+              <Button
+                onClick={() => setViewMode('list')}
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                size="sm"
+                className={viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'text-primary/70'}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Destinations Grid/List */}
+        {viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredAndSortedDestinations.map((destination) => (
+              <Card key={destination._id} className="border-primary/20 hover:border-primary transition-colors group">
+                <div className="relative">
+                  <Image
+                    src={destination.imageUrl}
+                    alt={destination.title}
+                    width={400}
+                    className="w-full h-64 object-cover rounded-t-lg"
+                  />
+                  <div className="absolute top-4 left-4 flex gap-2">
+                    <Badge className="bg-primary text-primary-foreground">
+                      {destination.continent}
+                    </Badge>
+                    {destination.featured && (
+                      <Badge variant="secondary" className="bg-secondary text-secondary-foreground">
+                        Featured
+                      </Badge>
+                    )}
+                  </div>
+                  {isAuthenticated && (
+                    <Button
+                      onClick={() => toggleFavorite(destination._id)}
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-4 right-4 bg-white/80 hover:bg-white"
+                    >
+                      <Heart 
+                        className={`h-4 w-4 ${isFavorite(destination._id) ? 'fill-red-500 text-red-500' : 'text-primary/70'}`} 
+                      />
+                    </Button>
+                  )}
+                </div>
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-heading text-xl text-primary group-hover:text-primary/80 transition-colors">
+                      {destination.title}
+                    </h3>
+                    <div className="flex items-center text-sm text-primary/70">
+                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400 mr-1" />
+                      {destination.rating}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center text-sm text-primary/70 mb-2">
+                    <MapPin className="h-4 w-4 mr-1" />
+                    {destination.continent} • {destination.travelType}
+                  </div>
+                  
+                  <p className="font-paragraph text-primary/80 mb-4 line-clamp-3">
+                    {destination.description}
+                  </p>
+                  
+                  <div className="flex items-center justify-between text-sm text-primary/70 mb-4">
+                    <div className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-1" />
+                      {destination.duration}
+                    </div>
+                    <div className="flex items-center">
+                      <span className="font-semibold text-primary">${destination.price}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <Button 
+                      asChild 
+                      className="flex-1 bg-transparent border border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                    >
+                      <Link to={`/destination/${destination._id}`}>
+                        View Details
+                      </Link>
+                    </Button>
+                    <Button 
+                      asChild 
+                      size="sm"
+                      className="bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      <Link to={`/booking?destination=${destination._id}`}>
+                        Book
+                      </Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {filteredAndSortedDestinations.map((destination) => (
+              <Card key={destination._id} className="border-primary/20 hover:border-primary transition-colors">
+                <CardContent className="p-6">
+                  <div className="flex flex-col lg:flex-row gap-6">
+                    <div className="lg:w-80 relative">
+                      <Image
+                        src={destination.imageUrl}
+                        alt={destination.title}
+                        width={320}
+                        className="w-full h-48 lg:h-full object-cover rounded-lg"
+                      />
+                      {isAuthenticated && (
+                        <Button
+                          onClick={() => toggleFavorite(destination._id)}
+                          variant="ghost"
+                          size="sm"
+                          className="absolute top-2 right-2 bg-white/80 hover:bg-white"
+                        >
+                          <Heart 
+                            className={`h-4 w-4 ${isFavorite(destination._id) ? 'fill-red-500 text-red-500' : 'text-primary/70'}`} 
+                          />
+                        </Button>
+                      )}
+                    </div>
+                    
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-heading text-2xl text-primary">{destination.title}</h3>
+                        <div className="flex items-center text-sm text-primary/70">
+                          <Star className="h-4 w-4 fill-yellow-400 text-yellow-400 mr-1" />
+                          {destination.rating}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-sm text-primary/70 mb-3">
+                        <div className="flex items-center">
+                          <MapPin className="h-4 w-4 mr-1" />
+                          {destination.continent}
+                        </div>
+                        <Badge variant="outline" className="border-primary/30 text-primary">
+                          {destination.travelType}
+                        </Badge>
+                        <div className="flex items-center">
+                          <Calendar className="h-4 w-4 mr-1" />
+                          {destination.duration}
+                        </div>
+                      </div>
+                      
+                      <p className="font-paragraph text-primary/80 mb-4">
+                        {destination.description}
+                      </p>
+                      
+                      {destination.highlights && destination.highlights.length > 0 && (
+                        <div className="mb-4">
+                          <h4 className="font-heading text-sm text-primary mb-2">Highlights:</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {destination.highlights.slice(0, 3).map((highlight, index) => (
+                              <Badge key={index} variant="secondary" className="text-xs">
+                                {highlight}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center">
+                        <div className="text-2xl font-bold text-primary">
+                          ${destination.price}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button 
+                            asChild 
+                            variant="outline"
+                            className="border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                          >
+                            <Link to={`/destination/${destination._id}`}>
+                              View Details
+                            </Link>
+                          </Button>
+                          <Button 
+                            asChild 
+                            className="bg-primary text-primary-foreground hover:bg-primary/90"
+                          >
+                            <Link to={`/booking?destination=${destination._id}`}>
+                              Book Now
+                            </Link>
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {filteredAndSortedDestinations.length === 0 && (
+          <div className="text-center py-16">
+            <div className="max-w-md mx-auto">
+              <MapPin className="h-16 w-16 text-primary/30 mx-auto mb-4" />
+              <h3 className="font-heading text-xl text-primary mb-2">No destinations found</h3>
+              <p className="font-paragraph text-primary/70 mb-4">
+                Try adjusting your search criteria or filters to find more destinations.
+              </p>
+              <Button 
+                onClick={clearFilters}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
